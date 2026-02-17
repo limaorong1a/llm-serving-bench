@@ -1,30 +1,16 @@
-import asyncio
-import time
-import statistics
-import json
 import argparse
+import asyncio
+import json
+import statistics
+import time
 from collections import Counter
-from typing import Optional, Tuple, Dict, Any, List
+from typing import Any
 
 import httpx
 
+from loadgen.metrics import percentile, summarize_latencies, tokens_per_second
+
 PROMPT = "你是一个严谨的助手。请用要点回答：什么是连续批处理（continuous batching）？"
-
-
-def percentile(sorted_vals: List[float], p: float) -> Optional[float]:
-    """Simple percentile with linear interpolation."""
-    if not sorted_vals:
-        return None
-    if p <= 0:
-        return sorted_vals[0]
-    if p >= 100:
-        return sorted_vals[-1]
-    n = len(sorted_vals)
-    pos = (p / 100.0) * (n - 1)
-    lo = int(pos)
-    hi = min(lo + 1, n - 1)
-    frac = pos - lo
-    return sorted_vals[lo] * (1 - frac) + sorted_vals[hi] * frac
 
 
 async def one_request_nonstream(
@@ -34,7 +20,7 @@ async def one_request_nonstream(
     max_tokens: int,
     temperature: float,
     top_p: float,
-) -> Tuple[float, Optional[int], int, Optional[str]]:
+) -> tuple[float, int | None, int, str | None]:
     """
     Returns:
       latency_s, completion_tokens, http_status, error_str
@@ -76,7 +62,7 @@ async def one_request_stream(
     max_tokens: int,
     temperature: float,
     top_p: float,
-) -> Tuple[float, Optional[float], Optional[float], Optional[int], int, Optional[str]]:
+) -> tuple[float, float | None, float | None, int | None, int, str | None]:
     """
     Streaming mode: measure TTFT and TPOT.
     Returns:
@@ -137,7 +123,7 @@ async def one_request_stream(
                 # Try to detect first content delta (TTFT proxy)
                 choices = chunk.get("choices") or []
                 if choices:
-                    delta = (choices[0].get("delta") or {})
+                    delta = choices[0].get("delta") or {}
                     content = delta.get("content")
                     if content:
                         delta_events += 1
@@ -187,23 +173,23 @@ async def run(
     temperature: float,
     top_p: float,
     stream: bool,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     url = f"{base_url.rstrip('/')}/v1/chat/completions"
     limits = httpx.Limits(
         max_connections=max(10, concurrency * 2),
         max_keepalive_connections=max(10, concurrency * 2),
     )
-
-    lats: List[float] = []
-    ttfts: List[float] = []
-    tpots: List[float] = []
-    toks: List[int] = []
-    errors: List[str] = []
+    lats: list[float] = []
+    ttfts: list[float] = []
+    tpots: list[float] = []
+    toks: list[int] = []
+    errors: list[str] = []
     status_counts = Counter()
 
     sem = asyncio.Semaphore(concurrency)
 
     async with httpx.AsyncClient(limits=limits) as client:
+
         async def worker():
             async with sem:
                 if stream:
@@ -238,15 +224,14 @@ async def run(
         wall_t1 = time.perf_counter()
 
     wall = wall_t1 - wall_t0
-    lats_sorted = sorted(lats)
     ttft_sorted = sorted(ttfts)
     tpot_sorted = sorted(tpots)
 
     total_tokens = sum(toks)
-    tps = (total_tokens / wall) if wall > 0 and total_tokens > 0 else None
+    tps = tokens_per_second(total_tokens, wall)
     rps = (requests / wall) if wall > 0 else None
     err_rate = (len(errors) / requests) if requests > 0 else None
-
+    lat_sum = summarize_latencies(lats)
     report = {
         "mode": "stream" if stream else "nonstream",
         "base_url": base_url,
@@ -260,12 +245,12 @@ async def run(
         "error_rate": err_rate,
         "http_status_counts": dict(status_counts),
         "latency": {
-            "mean_s": statistics.mean(lats) if lats else None,
-            "p50_s": percentile(lats_sorted, 50),
-            "p95_s": percentile(lats_sorted, 95),
-            "p99_s": percentile(lats_sorted, 99),
-            "min_s": min(lats) if lats else None,
-            "max_s": max(lats) if lats else None,
+            "mean_s": lat_sum.mean_s,
+            "p50_s": lat_sum.p50_s,
+            "p95_s": lat_sum.p95_s,
+            "p99_s": lat_sum.p99_s,
+            "min_s": lat_sum.min_s,
+            "max_s": lat_sum.max_s,
         },
         "tokens": {
             "completion_tokens_total": total_tokens if total_tokens > 0 else None,

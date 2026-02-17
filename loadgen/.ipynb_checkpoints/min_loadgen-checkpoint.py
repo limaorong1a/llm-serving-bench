@@ -5,27 +5,10 @@ import json
 import argparse
 from collections import Counter
 from typing import Optional, Tuple, Dict, Any, List
-
+from loadgen.metrics import percentile, summarize_latencies, tokens_per_second
 import httpx
 
 PROMPT = "你是一个严谨的助手。请用要点回答：什么是连续批处理（continuous batching）？"
-
-
-def percentile(sorted_vals: List[float], p: float) -> Optional[float]:
-    """Simple percentile with linear interpolation."""
-    if not sorted_vals:
-        return None
-    if p <= 0:
-        return sorted_vals[0]
-    if p >= 100:
-        return sorted_vals[-1]
-    n = len(sorted_vals)
-    pos = (p / 100.0) * (n - 1)
-    lo = int(pos)
-    hi = min(lo + 1, n - 1)
-    frac = pos - lo
-    return sorted_vals[lo] * (1 - frac) + sorted_vals[hi] * frac
-
 
 async def one_request_nonstream(
     client: httpx.AsyncClient,
@@ -193,8 +176,7 @@ async def run(
         max_connections=max(10, concurrency * 2),
         max_keepalive_connections=max(10, concurrency * 2),
     )
-
-    lats: List[float] = []
+    lats: list[float] = []
     ttfts: List[float] = []
     tpots: List[float] = []
     toks: List[int] = []
@@ -238,15 +220,14 @@ async def run(
         wall_t1 = time.perf_counter()
 
     wall = wall_t1 - wall_t0
-    lats_sorted = sorted(lats)
     ttft_sorted = sorted(ttfts)
     tpot_sorted = sorted(tpots)
-
+    
     total_tokens = sum(toks)
-    tps = (total_tokens / wall) if wall > 0 and total_tokens > 0 else None
+    tps = tokens_per_second(total_tokens, wall)
     rps = (requests / wall) if wall > 0 else None
     err_rate = (len(errors) / requests) if requests > 0 else None
-
+    lat_sum = summarize_latencies(lats)
     report = {
         "mode": "stream" if stream else "nonstream",
         "base_url": base_url,
@@ -260,12 +241,12 @@ async def run(
         "error_rate": err_rate,
         "http_status_counts": dict(status_counts),
         "latency": {
-            "mean_s": statistics.mean(lats) if lats else None,
-            "p50_s": percentile(lats_sorted, 50),
-            "p95_s": percentile(lats_sorted, 95),
-            "p99_s": percentile(lats_sorted, 99),
-            "min_s": min(lats) if lats else None,
-            "max_s": max(lats) if lats else None,
+            "mean_s": lat_sum.mean_s,
+            "p50_s": lat_sum.p50_s,
+            "p95_s": lat_sum.p95_s,
+            "p99_s": lat_sum.p99_s,
+            "min_s": lat_sum.min_s,
+            "max_s": lat_sum.max_s,
         },
         "tokens": {
             "completion_tokens_total": total_tokens if total_tokens > 0 else None,
