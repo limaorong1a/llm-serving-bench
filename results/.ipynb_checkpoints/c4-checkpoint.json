@@ -1,0 +1,28 @@
+{
+  "mode": "nonstream",
+  "base_url": "http://127.0.0.1:8000",
+  "endpoint": "/v1/chat/completions",
+  "model": "qwen2.5-7b",
+  "concurrency": 4,
+  "requests": 40,
+  "wall_time_s": 13.381715213065036,
+  "requests_per_second": 2.9891534353493494,
+  "error_count": 0,
+  "error_rate": 0.0,
+  "http_status_counts": {
+    "200": 40
+  },
+  "latency": {
+    "mean_s": 1.3338258049741853,
+    "p50_s": 1.3308601145399734,
+    "p95_s": 1.3635407443682197,
+    "p99_s": 1.364281822828343,
+    "min_s": 1.2857498310040683,
+    "max_s": 1.364404486026615
+  },
+  "tokens": {
+    "completion_tokens_total": 5113,
+    "tokens_per_second": 382.0885378735306,
+    "completion_tokens_available_requests": 40
+  }
+}

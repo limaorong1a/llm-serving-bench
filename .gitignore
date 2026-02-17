@@ -1,9 +1,10 @@
-# outputs
-results/
+.venv/
 __pycache__/
 *.pyc
-*.log
-
-# venv
-.venv/
-venv/
+results/*.log
+results/*.json
+*.pt
+*.bin
+*.safetensors
+.cache/
+.DS_Store
