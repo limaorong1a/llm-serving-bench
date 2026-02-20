@@ -1,12 +1,23 @@
-.PHONY: lint format test ci
+.PHONY: lint format format-check test ci run bench
+
+CONDA_ENV=llm
 
 lint:
-	ruff check .
+	conda run -n $(CONDA_ENV) ruff check .
 
 format:
-	ruff format .
+	conda run -n $(CONDA_ENV) ruff format .
+
+format-check:
+	conda run -n $(CONDA_ENV) ruff format --check .
 
 test:
-	pytest -q
+	conda run -n $(CONDA_ENV) pytest -q
 
-ci: lint test
+ci: lint format-check test
+
+run:
+	conda run -n $(CONDA_ENV) ./scripts/server.sh
+
+bench:
+	conda run -n $(CONDA_ENV) ./scripts/bench.sh
