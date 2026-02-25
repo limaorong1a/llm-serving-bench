@@ -20,7 +20,7 @@ async def one_request_nonstream(
     max_tokens: int,
     temperature: float,
     top_p: float,
-    prompt : str,
+    prompt: str,
 ) -> tuple[float, int | None, int, str | None]:
     """
     Returns:
@@ -175,7 +175,7 @@ async def run(
     temperature: float,
     top_p: float,
     stream: bool,
-    prompt:str,
+    prompt: str,
 ) -> dict[str, Any]:
     url = f"{base_url.rstrip('/')}/v1/chat/completions"
     limits = httpx.Limits(
@@ -197,7 +197,7 @@ async def run(
             async with sem:
                 if stream:
                     lat, ttft, tpot, out_tok, status, err = await one_request_stream(
-                        client, url, model, max_tokens, temperature, top_p,prompt
+                        client, url, model, max_tokens, temperature, top_p, prompt
                     )
                     lats.append(lat)
                     status_counts[status] += 1
@@ -211,7 +211,7 @@ async def run(
                         errors.append(err)
                 else:
                     lat, out_tok, status, err = await one_request_nonstream(
-                        client, url, model, max_tokens, temperature, top_p,prompt
+                        client, url, model, max_tokens, temperature, top_p, prompt
                     )
                     lats.append(lat)
                     status_counts[status] += 1
