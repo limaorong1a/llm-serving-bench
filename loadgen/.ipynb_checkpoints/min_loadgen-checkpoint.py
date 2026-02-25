@@ -1,14 +1,17 @@
-import asyncio
-import time
-import statistics
-import json
 import argparse
+import asyncio
+import json
+import statistics
+import time
 from collections import Counter
-from typing import Optional, Tuple, Dict, Any, List
-from loadgen.metrics import percentile, summarize_latencies, tokens_per_second
+from typing import Any
+
 import httpx
 
-PROMPT = "你是一个严谨的助手。请用要点回答：什么是连续批处理（continuous batching）？"
+from .metrics import percentile, summarize_latencies, tokens_per_second
+
+BASE_PROMPT = "你是一个严谨的助手。请用要点回答：什么是连续批处理（continuous batching）？"
+
 
 async def one_request_nonstream(
     client: httpx.AsyncClient,
@@ -17,7 +20,8 @@ async def one_request_nonstream(
     max_tokens: int,
     temperature: float,
     top_p: float,
-) -> Tuple[float, Optional[int], int, Optional[str]]:
+    prompt : str,
+) -> tuple[float, int | None, int, str | None]:
     """
     Returns:
       latency_s, completion_tokens, http_status, error_str
@@ -28,7 +32,7 @@ async def one_request_nonstream(
             url,
             json={
                 "model": model,
-                "messages": [{"role": "user", "content": PROMPT}],
+                "messages": [{"role": "user", "content": prompt}],
                 "max_tokens": max_tokens,
                 "temperature": temperature,
                 "top_p": top_p,
@@ -59,7 +63,8 @@ async def one_request_stream(
     max_tokens: int,
     temperature: float,
     top_p: float,
-) -> Tuple[float, Optional[float], Optional[float], Optional[int], int, Optional[str]]:
+    prompt: str,
+) -> tuple[float, float | None, float | None, int | None, int, str | None]:
     """
     Streaming mode: measure TTFT and TPOT.
     Returns:
@@ -86,7 +91,7 @@ async def one_request_stream(
             url,
             json={
                 "model": model,
-                "messages": [{"role": "user", "content": PROMPT}],
+                "messages": [{"role": "user", "content": prompt}],
                 "max_tokens": max_tokens,
                 "temperature": temperature,
                 "top_p": top_p,
@@ -120,7 +125,7 @@ async def one_request_stream(
                 # Try to detect first content delta (TTFT proxy)
                 choices = chunk.get("choices") or []
                 if choices:
-                    delta = (choices[0].get("delta") or {})
+                    delta = choices[0].get("delta") or {}
                     content = delta.get("content")
                     if content:
                         delta_events += 1
@@ -170,27 +175,29 @@ async def run(
     temperature: float,
     top_p: float,
     stream: bool,
-) -> Dict[str, Any]:
+    prompt:str,
+) -> dict[str, Any]:
     url = f"{base_url.rstrip('/')}/v1/chat/completions"
     limits = httpx.Limits(
         max_connections=max(10, concurrency * 2),
         max_keepalive_connections=max(10, concurrency * 2),
     )
     lats: list[float] = []
-    ttfts: List[float] = []
-    tpots: List[float] = []
-    toks: List[int] = []
-    errors: List[str] = []
+    ttfts: list[float] = []
+    tpots: list[float] = []
+    toks: list[int] = []
+    errors: list[str] = []
     status_counts = Counter()
 
     sem = asyncio.Semaphore(concurrency)
 
     async with httpx.AsyncClient(limits=limits) as client:
+
         async def worker():
             async with sem:
                 if stream:
                     lat, ttft, tpot, out_tok, status, err = await one_request_stream(
-                        client, url, model, max_tokens, temperature, top_p
+                        client, url, model, max_tokens, temperature, top_p,prompt
                     )
                     lats.append(lat)
                     status_counts[status] += 1
@@ -204,7 +211,7 @@ async def run(
                         errors.append(err)
                 else:
                     lat, out_tok, status, err = await one_request_nonstream(
-                        client, url, model, max_tokens, temperature, top_p
+                        client, url, model, max_tokens, temperature, top_p,prompt
                     )
                     lats.append(lat)
                     status_counts[status] += 1
@@ -222,7 +229,7 @@ async def run(
     wall = wall_t1 - wall_t0
     ttft_sorted = sorted(ttfts)
     tpot_sorted = sorted(tpots)
-    
+
     total_tokens = sum(toks)
     tps = tokens_per_second(total_tokens, wall)
     rps = (requests / wall) if wall > 0 else None
@@ -291,8 +298,9 @@ def main():
     ap.add_argument("--requests", type=int, default=32)
     ap.add_argument("--stream", action="store_true", help="Enable streaming and measure TTFT/TPOT")
     ap.add_argument("--out", default="")
+    ap.add_argument("--prompt-repeat", type=int, default=1)
     args = ap.parse_args()
-
+    prompt = (BASE_PROMPT + "\n") * args.prompt_repeat
     rep = asyncio.run(
         run(
             args.concurrency,
@@ -303,6 +311,7 @@ def main():
             args.temperature,
             args.top_p,
             args.stream,
+            prompt,
         )
     )
     print(json.dumps(rep, ensure_ascii=False, indent=2))

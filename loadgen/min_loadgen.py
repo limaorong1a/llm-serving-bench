@@ -8,9 +8,9 @@ from typing import Any
 
 import httpx
 
-from loadgen.metrics import percentile, summarize_latencies, tokens_per_second
+from .metrics import percentile, summarize_latencies, tokens_per_second
 
-PROMPT = "你是一个严谨的助手。请用要点回答：什么是连续批处理（continuous batching）？"
+BASE_PROMPT = "你是一个严谨的助手。请用要点回答：什么是连续批处理（continuous batching）？"
 
 
 async def one_request_nonstream(
@@ -20,6 +20,7 @@ async def one_request_nonstream(
     max_tokens: int,
     temperature: float,
     top_p: float,
+    prompt : str,
 ) -> tuple[float, int | None, int, str | None]:
     """
     Returns:
@@ -31,7 +32,7 @@ async def one_request_nonstream(
             url,
             json={
                 "model": model,
-                "messages": [{"role": "user", "content": PROMPT}],
+                "messages": [{"role": "user", "content": prompt}],
                 "max_tokens": max_tokens,
                 "temperature": temperature,
                 "top_p": top_p,
@@ -62,6 +63,7 @@ async def one_request_stream(
     max_tokens: int,
     temperature: float,
     top_p: float,
+    prompt: str,
 ) -> tuple[float, float | None, float | None, int | None, int, str | None]:
     """
     Streaming mode: measure TTFT and TPOT.
@@ -89,7 +91,7 @@ async def one_request_stream(
             url,
             json={
                 "model": model,
-                "messages": [{"role": "user", "content": PROMPT}],
+                "messages": [{"role": "user", "content": prompt}],
                 "max_tokens": max_tokens,
                 "temperature": temperature,
                 "top_p": top_p,
@@ -173,6 +175,7 @@ async def run(
     temperature: float,
     top_p: float,
     stream: bool,
+    prompt:str,
 ) -> dict[str, Any]:
     url = f"{base_url.rstrip('/')}/v1/chat/completions"
     limits = httpx.Limits(
@@ -194,7 +197,7 @@ async def run(
             async with sem:
                 if stream:
                     lat, ttft, tpot, out_tok, status, err = await one_request_stream(
-                        client, url, model, max_tokens, temperature, top_p
+                        client, url, model, max_tokens, temperature, top_p,prompt
                     )
                     lats.append(lat)
                     status_counts[status] += 1
@@ -208,7 +211,7 @@ async def run(
                         errors.append(err)
                 else:
                     lat, out_tok, status, err = await one_request_nonstream(
-                        client, url, model, max_tokens, temperature, top_p
+                        client, url, model, max_tokens, temperature, top_p,prompt
                     )
                     lats.append(lat)
                     status_counts[status] += 1
@@ -295,8 +298,9 @@ def main():
     ap.add_argument("--requests", type=int, default=32)
     ap.add_argument("--stream", action="store_true", help="Enable streaming and measure TTFT/TPOT")
     ap.add_argument("--out", default="")
+    ap.add_argument("--prompt-repeat", type=int, default=1)
     args = ap.parse_args()
-
+    prompt = (BASE_PROMPT + "\n") * args.prompt_repeat
     rep = asyncio.run(
         run(
             args.concurrency,
@@ -307,6 +311,7 @@ def main():
             args.temperature,
             args.top_p,
             args.stream,
+            prompt,
         )
     )
     print(json.dumps(rep, ensure_ascii=False, indent=2))
